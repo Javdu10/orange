@@ -48,9 +48,22 @@ export class ChatRoom {
 
 		// check for previous sessions.
 		state.blockConcurrencyWhile(async () => {
+			let currentAlarm = await this.storage.getAlarm();
+			if (currentAlarm == null) {
+				console.log('setting alarm from constructor')
+				this.storage.setAlarm(Date.now() + 3 * 1000);
+			}
 			this.sessions = (await this.storage.get<Session[]>('sessions')) ?? []
 			this.sessions.forEach((s) => this.setupHeartbeatInterval(s))
 		})
+	}
+
+	async alarm() {
+		let currentAlarm = await this.storage.getAlarm();
+		if (currentAlarm == null) {
+			this.storage.setAlarm(Date.now() + 3 * 1000);
+		}
+		console.log('alarm hey')
 	}
 
 	// The system will call fetch() whenever an HTTP request is sent to this Object. Such requests
@@ -60,7 +73,7 @@ export class ChatRoom {
 	async fetch(request: Request) {
 		return await handleErrors(request, async () => {
 			let url = new URL(request.url)
-
+			
 			switch (url.pathname) {
 				case '/websocket': {
 					// The request is to `/api/room/<name>/websocket`. A client is trying to establish a new
@@ -116,7 +129,8 @@ export class ChatRoom {
 			'sessions',
 			this.sessions.map(({ webSocket, heartbeatTimeout, ...s }) => s)
 		)
-
+	
+	// maybe I don't need alarm and simply use setInterval with lower interval ?
 	broadcastState = () => {
 		if (this.sessions.length > 0 && this.stateSyncInterval === null) {
 			this.stateSyncInterval = setInterval(this.broadcastState, 5000)
@@ -239,7 +253,15 @@ export class ChatRoom {
 					case 'userUpdate':
 						const updateSession = this.sessions.find((s) => s.id === session.id)
 						if (updateSession) {
+							if (data.user.tracks.audioEnabled !== updateSession.user.tracks.audioEnabled) {
+								if (!data.user.tracks.audioEnabled) {
+									data.user.tracks.audio = undefined
+									console.log('user updated', updateSession.user)
+								}
+							}
+							
 							updateSession.user = data.user
+							
 							this.broadcastState()
 						}
 						break
@@ -264,6 +286,7 @@ export class ChatRoom {
 								type: 'muteMic',
 							})
 							this.broadcastState()
+							console.log('muted user', userToMute.user)
 						}
 						break
 					default:
